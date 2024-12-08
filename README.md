@@ -33,7 +33,7 @@ The first part of the project uses an LSTM (Long Short-Term Memory) model to pre
 Install dependencies with the following command:
 
 ```bash
-pip install numpy pandas yfinance sklearn keras matplotlib
+pip install numpy pandas yfinance=0.2.40 sklearn keras matplotlib
 ```
 
 ---
