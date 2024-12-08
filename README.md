@@ -3,7 +3,7 @@
 This project consists of two main parts:
 
 1. **Stock Price Prediction Using LSTM**: A machine learning model that predicts stock prices of tech companies (Apple, Google, Microsoft, Amazon).
-2. **Sentiment Analysis of Tweets Using Tweepy and a Simple Neural Network**: A model that analyzes sentiment (up or down) of tweets related to stock market movements using Tweepy to fetch tweets and a simple neural network for sentiment analysis.
+2. **Sentiment Analysis of Tweets**: A model that analyzes sentiment (up or down) of tweets related to stock market movements using data augmentation and an LSTM network.
 
 ---
 
@@ -33,153 +33,190 @@ The first part of the project uses an LSTM (Long Short-Term Memory) model to pre
 Install dependencies with the following command:
 
 ```bash
-pip install numpy pandas yfinance=0.2.40 sklearn keras matplotlib
+pip install numpy pandas yfinance sklearn keras matplotlib
 ```
 
 ---
 
-## Part 2: Sentiment Analysis of Tweets Using Tweepy and Simple NN
+## Part 2: Sentiment Analysis of Tweets Using LSTM and Data Augmentation
 
 ### Overview
 
-This part of the project uses Tweepy to fetch tweets from Twitter, and a simple neural network (NN) to perform sentiment analysis (up or down). We use a basic NN model instead of LSTM for simplicity.
+This part of the project focuses on performing sentiment analysis on stock market-related tweets using an LSTM-based neural network. We perform data augmentation by replacing words with their synonyms using WordNet.
 
 ### Steps
 
-1. **Fetch Tweets Using Tweepy**:
-   - Tweets are fetched using the Tweepy API based on a search query or hashtag.
-   
-2. **Data Preprocessing**:
-   - Text is cleaned by removing URLs, hashtags, and punctuation.
-   - Tweets are tokenized and padded to ensure consistent input shape.
-
-3. **Sentiment Labeling**:
-   - Tweets are labeled as either `up` (bullish sentiment) or `down` (bearish sentiment).
-
-4. **Model Building**:
-   - A simple fully connected neural network is used for sentiment classification.
-   
-5. **Training**:
-   - The model is trained on the labeled tweet data.
-
-6. **Prediction**:
+1. **Data Augmentation**:
+   - A custom function replaces random words in the text with synonyms using WordNet.
+   - This helps generate more training data by augmenting the existing dataset.
+2. **Text Preprocessing**:
+   - Tweets are cleaned by removing URLs, hashtags, and punctuation.
+   - Text is tokenized, and sequences are padded to a fixed length.
+3. **Model Building**:
+   - A Keras LSTM model is built to classify tweets as either "up" (bullish sentiment) or "down" (bearish sentiment).
+4. **Training**:
+   - The model is trained using the augmented data and validated on test data.
+5. **Prediction**:
    - The trained model predicts sentiment for new tweets.
+   
+### Code Explanation
 
-### Code Example
+#### Data Augmentation
 
-#### Fetching Tweets with Tweepy
-
-Here is the code to fetch tweets using Tweepy:
+The following code augments the tweet data by replacing synonyms using WordNet:
 
 ```python
-import tweepy
+import random
+from nltk.corpus import wordnet
 import pandas as pd
 
-# Set up Twitter API credentials (replace with your own)
-consumer_key = 'YOUR_CONSUMER_KEY'
-consumer_secret = 'YOUR_CONSUMER_SECRET'
-access_token = 'YOUR_ACCESS_TOKEN'
-access_token_secret = 'YOUR_ACCESS_TOKEN_SECRET'
+# Load your dataset
+file_path = "/content/tweets.csv"  # Update with your file path
+data = pd.read_csv(file_path)
 
-# Authenticate to Twitter
-auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
-auth.set_access_token(access_token, access_token_secret)
-api = tweepy.API(auth)
+# Ensure the text column is named correctly
+text_column = "text"  # Replace with the correct column name in your dataset
+data = data.dropna(subset=[text_column])  # Drop rows with missing text
 
-# Fetch tweets
-query = 'stock market'  # Change to your desired search query
-tweets = api.search(q=query, count=100, lang='en', tweet_mode='extended')
+# Synonym replacement using WordNet
+def synonym_replacement(sentence, n=2):
+    words = sentence.split()
+    new_words = words.copy()
+    random_word_list = list(set(words))
+    random.shuffle(random_word_list)
+    num_replaced = 0
 
-# Create a DataFrame with tweet data
-tweet_data = pd.DataFrame([[tweet.created_at, tweet.full_text] for tweet in tweets], columns=['Date', 'Text'])
+    for random_word in random_word_list:
+        synonyms = get_synonyms(random_word)
+        if len(synonyms) >= 1:
+            synonym = random.choice(list(synonyms))
+            new_words = [synonym if word == random_word else word for word in new_words]
+            num_replaced += 1
+        if num_replaced >= n:
+            break
 
-# Save the DataFrame to a CSV
-tweet_data.to_csv('tweets.csv', index=False)
+    return ' '.join(new_words)
 
-print("Tweets have been downloaded successfully.")
+# Helper function to get synonyms using WordNet
+def get_synonyms(word):
+    synonyms = set()
+    for syn in wordnet.synsets(word):
+        for lemma in syn.lemmas():
+            synonym = lemma.name().replace("_", " ").lower()
+            if synonym != word:
+                synonyms.add(synonym)
+    return synonyms
+
+# Augment data by applying transformations
+def augment_data(data, text_column, n_augments=2):
+    augmented_texts = []
+    for _, row in data.iterrows():
+        original_text = row[text_column]
+        for _ in range(n_augments):
+            augmented_text = synonym_replacement(original_text)
+            augmented_texts.append(augmented_text)
+
+    return augmented_texts
+
+# Perform data augmentation
+augmented_texts = augment_data(data, text_column)
+
+# Create a new DataFrame for augmented data
+augmented_df = pd.DataFrame({text_column: augmented_texts})
+
+# Save augmented data to a CSV file
+output_file = "/content/augmented_tweets.csv"
+augmented_df.to_csv(output_file, index=False)
+
+print(f"Augmented data saved to {output_file}")
 ```
 
-#### Data Preprocessing
+#### Sentiment Analysis Model
+
+The model is built using Keras with an LSTM layer for sequential data. Here's the code for training the sentiment analysis model:
 
 ```python
-import re
+import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
 
-# Clean the tweet text
+# Load the dataset
+file_path = '/content/tweets.csv'
+tweets_data = pd.read_csv(file_path)
+
+# Clean the text data
 def clean_text(text):
+    import re
     text = re.sub(r"http\S+", "", text)  # Remove URLs
     text = re.sub(r"#\w+", "", text)    # Remove hashtags
     text = re.sub(r"[^\w\s]", "", text) # Remove punctuation
     text = text.lower().strip()         # Convert to lowercase
     return text
 
-tweet_data['clean_text'] = tweet_data['Text'].apply(clean_text)
+tweets_data['clean_text'] = tweets_data['text'].apply(clean_text)
 
-# Labeling sentiments as 'up' or 'down' (dummy labels)
-# In practice, these labels should come from manual annotation or sentiment analysis
-tweet_data['label'] = tweet_data['Text'].apply(lambda x: 'up' if 'bullish' in x.lower() else 'down')
+# Map labels to integers
+tweets_data['label'] = tweets_data['prediction'].map({'up': 1, 'down': 0})
 
-# Tokenization and padding
+# Tokenize and pad sequences
 tokenizer = Tokenizer()
-tokenizer.fit_on_texts(tweet_data['clean_text'])
-sequences = tokenizer.texts_to_sequences(tweet_data['clean_text'])
-max_length = 50
-X = pad_sequences(sequences, maxlen=max_length)
+tokenizer.fit_on_texts(tweets_data['clean_text'])
+sequences = tokenizer.texts_to_sequences(tweets_data['clean_text'])
+max_length = 50  # Define max length for padding
+padded_sequences = pad_sequences(sequences, maxlen=max_length)
 
-# Encoding labels
-encoder = LabelEncoder()
-y = encoder.fit_transform(tweet_data['label'])
+# Split data into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(padded_sequences, tweets_data['label'], test_size=0.2, random_state=42)
 
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-```
-
-#### Building and Training the Simple NN Model
-
-```python
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Embedding, Flatten
-from tensorflow.keras.optimizers import Adam
-
-# Simple NN model
-model = Sequential()
-model.add(Embedding(input_dim=len(tokenizer.word_index) + 1, output_dim=64, input_length=max_length))
-model.add(Flatten())
-model.add(Dense(64, activation='relu'))
-model.add(Dense(1, activation='sigmoid'))
+# Build the Keras model
+model = Sequential([
+    Embedding(input_dim=len(tokenizer.word_index) + 1, output_dim=64, input_length=max_length),
+    LSTM(128, dropout=0.2),
+    Dense(64, activation='relu'),
+    Dense(1, activation='sigmoid')  # Binary classification (up or down)
+])
 
 # Compile the model
-model.compile(optimizer=Adam(), loss='binary_crossentropy', metrics=['accuracy'])
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
 # Train the model
 history = model.fit(X_train, y_train, epochs=5, batch_size=32, validation_data=(X_test, y_test))
-```
 
-#### Evaluating and Predicting Sentiment
-
-```python
 # Evaluate the model
 loss, accuracy = model.evaluate(X_test, y_test)
 print(f"Test Accuracy: {accuracy * 100:.2f}%")
 
-# Example of predicting sentiment for new tweets
+# Save the tokenizer and model
+import pickle
+with open('tokenizer.pkl', 'wb') as f:
+    pickle.dump(tokenizer, f)
+
+model.save('tweet_sentiment_model.h5')
+```
+
+### Usage
+
+1. **Training the Sentiment Analysis Model**:
+   - Ensure you have a CSV file with a `text` column and a `prediction` column for sentiment (either "up" or "down").
+   - Clean the text, augment it with synonyms, and train the model as described.
+
+2. **Prediction**:
+   - Use the trained model to predict sentiment for new tweets:
+
+```python
 new_texts = [
     "The stock market is looking strong today. Bullish sentiments everywhere!",
     "Expecting a crash soon as things are overbought."
 ]
 
-# Preprocess new texts
+# Preprocess and predict sentiment
 new_sequences = tokenizer.texts_to_sequences(new_texts)
-new_padded = pad_sequences(new_sequences, maxlen=50)
-
-# Predict sentiment
+new_padded = pad_sequences(new_sequences, maxlen=45, padding='post', truncating='post')
 predictions = model.predict(new_padded)
 
-# Interpret predictions
 for text, pred in zip(new_texts, predictions):
     sentiment = "Up" if pred > 0.5 else "Down"
     print(f"Text: {text}")
@@ -187,38 +224,7 @@ for text, pred in zip(new_texts, predictions):
     print("-" * 40)
 ```
 
-### Dependencies
-
-- `tweepy`
-- `pandas`
-- `numpy`
-- `re`
-- `scikit-learn`
-- `tensorflow`
-- `keras`
-
-Install dependencies with the following command:
-
-```bash
-pip install tweepy pandas numpy scikit-learn tensorflow keras
-```
-
-### Usage
-
-1. **Fetching Tweets**:
-   - Ensure you have valid Twitter API keys and replace them in the Tweepy setup section.
-   - Tweets are fetched using a search query and saved to a CSV.
-
-2. **Training the Sentiment Analysis Model**:
-   - The text is cleaned, tokenized, and padded.
-   - A simple NN model is trained to predict sentiment (up or down).
-
-3. **Prediction**:
-   - Use the trained model to predict the sentiment of new tweets.
-
-
+---
 ## License
 
 Need Licensing for it
-
----
