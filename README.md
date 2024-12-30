@@ -227,4 +227,5 @@ for text, pred in zip(new_texts, predictions):
 ---
 ## License
 
-Need Licensing for it
+Apache 2.0 License
+2024 Manoj Nayak
